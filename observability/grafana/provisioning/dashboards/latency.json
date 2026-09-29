@@ -1,6 +1,6 @@
 {
   "uid": "labs-p99",
-  "title": "Interview Labs - Service Latency",
+  "title": "Service Latency",
   "schemaVersion": 39,
   "time": {
     "from": "now-30m",
