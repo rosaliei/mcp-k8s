@@ -1,21 +1,33 @@
-# Start everything:   docker compose up -d --build
-# Stop everything:    docker compose down
+# Docker Compose: starts several containers together, on one private network.
+#
+#   docker compose up -d --build    build the image (if the code changed) and start everything in the background
+#   docker compose ps               list the containers and their status
+#   docker compose logs -f <name>   follow one service's logs (Ctrl+C to stop following)
+#   docker compose down             stop and remove the containers
 #
 #   sample-app  (:8000)  fake microservices exposing /metrics
 #   graphql-api (:8001)  GraphQL over Prometheus   -> http://localhost:8001/graphql
 #   prometheus  (:9090)  scrapes sample-app and graphql-api by their service names
 #   grafana     (:3001)  dashboards                -> http://localhost:3001
 #
-# MySQL for practice (only starts with the profile):   docker compose --profile practice up -d
+# Optional MySQL for practice (only starts with the profile):  docker compose --profile practice up -d
 #
-# One-off tools (bench.py, client_test.py, review.py) still run from your terminal with the .venv.
+# One-off tools (bench.py, client_test.py, review.py) run from your terminal with the .venv, not here.
+#
+# KEY IDEAS
+#   ports "8000:8000"   = "<port on your Mac>:<port inside the container>". Without it, only other
+#                         containers could reach the service.
+#   service names       = DNS names on the compose network: graphql-api reaches Prometheus at
+#                         http://prometheus:9090, NOT localhost (inside a container, localhost = itself).
+#   build: .            = build the image from the Dockerfile in this folder (both Python services share it)
+#   command:            = which script this container runs
 
 services:
   sample-app:
     build: .
     command: python observability/sample_app.py
     environment:
-      INCIDENT: ${INCIDENT:-}          # INCIDENT=checkout docker compose up -d sample-app
+      INCIDENT: ${INCIDENT:-}          # taken from your shell: INCIDENT=checkout docker compose up -d sample-app
     ports: ["8000:8000"]
 
   graphql-api:
@@ -26,35 +38,43 @@ services:
     ports: ["8001:8001"]
     depends_on:
       prometheus:
-        condition: service_healthy       # wait until Prometheus is ready, or the API falls back to fake data
+        # Wait until Prometheus passes its healthcheck (below). Without this, graphql-api can start
+        # first, find no Prometheus, and quietly fall back to fake data.
+        condition: service_healthy
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v2.53.0     # an official image; pin the version so it doesn't change under you
     ports: ["9090:9090"]
     volumes:
+      # "<file on your Mac>:<path in container>:ro"  (ro = read-only). Edit the file, then
+      # `docker compose restart prometheus` to reload it.
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
     healthcheck:
+      # Docker runs this inside the container every 5s. Exit code 0 = healthy.
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
       interval: 5s
-      retries: 12
+      retries: 12                      # 12 x 5s = up to 1 minute to become healthy
 
   grafana:
     image: grafana/grafana:11.1.0
-    ports: ["3001:3000"]                 # 3001 because port 3000 is often taken
+    ports: ["3001:3000"]               # 3001 on your Mac because port 3000 is often taken
     environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # no login needed (local demo only!)
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
     volumes:
+      # "Provisioning": Grafana reads these files at startup: the Prometheus data source and the dashboard.
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on: [prometheus]
 
   mysql:
     image: mysql:8.4
-    profiles: ["practice"]               # optional: only starts with --profile practice
-    ports: ["3307:3306"]                 # 3307 so it never clashes with a local MySQL
+    profiles: ["practice"]             # optional: only starts with --profile practice
+    ports: ["3307:3306"]               # 3307 on your Mac, so it never clashes with a local MySQL
     environment:
       MYSQL_ROOT_PASSWORD: rootpw
       MYSQL_DATABASE: support
     volumes:
+      # Any .sql file in /docker-entrypoint-initdb.d runs ONCE, when the database is first created.
+      # To run it again: docker compose --profile practice down -v   (-v deletes the data volume)
       - ./practice/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

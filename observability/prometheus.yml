@@ -1,13 +1,19 @@
+# Prometheus configuration. Mounted into the prometheus container by docker-compose.yml.
+
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 15s       # how often Prometheus pulls /metrics from every target
+  evaluation_interval: 15s   # how often it evaluates the recording and alerting rules
 
-rule_files: [/etc/prometheus/rules.yml]
+rule_files: [/etc/prometheus/rules.yml]   # the rules file (path INSIDE the container)
 
+# PULL MODEL: Prometheus goes to each target and fetches http://<target>/metrics.
+# The apps don't push anything. If a target can't be reached, its "up" metric becomes 0.
+# Inside Docker Compose, containers reach each other by SERVICE NAME (sample-app, graphql-api),
+# not by localhost: "localhost" inside a container means that container itself.
 scrape_configs:
-  - job_name: sample-app          # fake microservices (sample_app.py, running in Docker)
+  - job_name: sample-app          # the fake microservices (observability/sample_app.py)
     static_configs: [{targets: ["sample-app:8000"]}]
-  - job_name: graphql-api         # the GraphQL lab server measures itself too
+  - job_name: graphql-api         # the GraphQL API measures itself too
     static_configs: [{targets: ["graphql-api:8001"]}]
-  - job_name: prometheus
+  - job_name: prometheus          # Prometheus's own metrics
     static_configs: [{targets: ["localhost:9090"]}]

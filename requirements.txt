@@ -1,7 +1,8 @@
-fastapi>=0.110
-uvicorn>=0.29
-strawberry-graphql>=0.240
-httpx>=0.27
-prometheus-client>=0.20
-mcp>=2.2
-anthropic>=0.60
+# Python packages this project needs. Installed by ./setup.sh (on your Mac) and by the Dockerfile (in the image).
+fastapi>=0.110             # web framework for the GraphQL API
+uvicorn>=0.29              # the web server that runs FastAPI
+strawberry-graphql>=0.240  # GraphQL: Python classes -> GraphQL schema, plus DataLoader for batching
+httpx>=0.27                # HTTP client (calls Prometheus and the GraphQL API)
+prometheus-client>=0.20    # expose /metrics (Counter, Gauge, Histogram)
+mcp>=2.2                   # Model Context Protocol SDK: the MCP server and test client
+anthropic>=0.60            # Claude API, only used by code_review/review.py --llm

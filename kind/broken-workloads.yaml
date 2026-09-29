@@ -1,11 +1,21 @@
 # Workloads with realistic problems for the MCP agent to investigate.
 # Same scenarios as the mock cluster in mcp_server/server.py, but real.
+#
+# Each is a Deployment: "keep 1 copy (replica) of this pod running". If the pod dies, Kubernetes
+# starts a new one. That's why a crashing pod gets RESTARTS, and then CrashLoopBackOff:
+# Kubernetes waits longer and longer between restarts (10s, 20s, 40s ... up to 5 minutes).
+#
+# requests = what the scheduler reserves on a node for the pod ("I need at least this")
+# limits   = the hard maximum. Going over the MEMORY limit gets the container killed (OOMKilled, exit 137).
+#            Going over a CPU limit only slows it down (throttling), it doesn't kill it.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: payments
 ---
 # 1. checkout: uses more memory than its limit -> OOMKilled -> CrashLoopBackOff
+#    The kernel kills the process instantly, so the app never logs an error.
+#    Evidence: `kubectl describe pod` -> Last State: Terminated, Reason: OOMKilled, Exit Code: 137
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,7 +40,8 @@ spec:
             requests: {memory: 64Mi, cpu: 50m}
             limits: {memory: 128Mi}                 # too small -> OOMKilled
 ---
-# 2. ledger: image tag has a typo -> ImagePullBackOff
+# 2. ledger: image tag has a typo -> ErrImagePull, then ImagePullBackOff (retrying with longer waits)
+#    Evidence: events -> Failed to pull image "busybox:1.36-typo": not found
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -67,6 +78,8 @@ spec:
             requests: {memory: 16Mi, cpu: 10m}
 ---
 # 4. ingest: asks for more CPU than any node has -> Pending (FailedScheduling)
+#    The scheduler can't find a node with 64 free CPUs, so the pod never starts. No logs exist.
+#    Evidence: events -> 0/1 nodes are available: 1 Insufficient cpu
 apiVersion: apps/v1
 kind: Deployment
 metadata:

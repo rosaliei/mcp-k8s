@@ -1,13 +1,21 @@
 #!/bin/sh
-# Git runs this before every commit. It reviews ONLY what you staged (git add).
-# If critical/high issues are found, the commit is blocked.
+# GIT HOOK: git runs this script automatically before every `git commit`.
+# If the script exits with a non-zero code, git CANCELS the commit.
 #
-# Turn on once:   git config core.hooksPath hooks
-# Skip once:      git commit --no-verify
+# What it does: runs the code reviewer on ONLY what you staged (`git add`).
+# If there are critical or high findings (review.py exits 1) or an agent failed (exits 2),
+# the commit is blocked.
+#
+# Turn on once:   git config core.hooksPath hooks      (./setup.sh does this for you)
+# Skip once:      git commit --no-verify               (use when you know what you're doing)
+
+# Use the project's .venv Python if it exists; otherwise the system python3.
 if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python3; fi
+
 $PY code_review/review.py --staged
-status=$?
-if [ $status -ne 0 ]; then
+status=$?                        # $? = exit code of the last command
+
+if [ $status -ne 0 ]; then       # -ne = "not equal"
   echo ""
   echo "Commit blocked by code review. Fix the issues, or skip with: git commit --no-verify"
   exit 1

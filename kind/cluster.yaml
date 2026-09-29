@@ -1,6 +1,8 @@
-# A 1-node Kubernetes cluster running inside Docker.
+# kind = "Kubernetes IN Docker". Each Kubernetes node is a Docker container on your Mac.
+# This creates a real (small) Kubernetes cluster: real API server, scheduler, kubelet, containerd.
+# Used by kind/up.sh:   kind create cluster --config kind/cluster.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: mcp-k8s
+name: mcp-k8s                  # cluster name; kind calls the kubectl context "kind-mcp-k8s"
 nodes:
-  - role: control-plane
+  - role: control-plane        # one node that is both control plane and worker (enough for a demo)

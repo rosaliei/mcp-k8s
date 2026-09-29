@@ -1,21 +1,25 @@
-# Runs the multi-agent reviewer on every pull request and posts the result as a PR comment.
-# Offline rules by default. If you add a repo secret ANTHROPIC_API_KEY, it uses Claude agents instead.
+# GITHUB ACTIONS WORKFLOW: GitHub runs this automatically on its own machines.
+# Trigger: every pull request. It runs the multi-agent reviewer on the PR's changes,
+# posts the report as a comment on the PR, and marks the check as failed if the verdict isn't APPROVE.
+#
+# Offline regex rules by default. To use Claude agents instead, add a repository secret named
+# ANTHROPIC_API_KEY (GitHub repo -> Settings -> Secrets and variables -> Actions).
 name: code-review
 
 on:
-  pull_request:
+  pull_request:                # run when a PR is opened or updated
 
 permissions:
-  contents: read
-  pull-requests: write      # needed to post the comment
+  contents: read               # read the code
+  pull-requests: write         # post the comment
 
 jobs:
   review:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest     # a fresh Linux machine for every run
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # full history, so we can diff against the base branch
+          fetch-depth: 0       # full git history, so we can diff against the base branch
 
       - uses: actions/setup-python@v5
         with:
@@ -27,18 +31,19 @@ jobs:
       - name: Run review
         id: review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # empty if the secret isn't set
         run: |
           FLAG=""
-          if [ -n "$ANTHROPIC_API_KEY" ]; then FLAG="--llm"; fi
-          set +e
+          if [ -n "$ANTHROPIC_API_KEY" ]; then FLAG="--llm"; fi   # -n = "not empty"
+          set +e                    # don't stop the script if review.py exits 1 or 2; we handle it below
+          # github.base_ref = the branch the PR wants to merge into (e.g. main)
           python code_review/review.py --diff "origin/${{ github.base_ref }}" --markdown $FLAG > review.md
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"                  # save the exit code for later steps
           cat review.md
 
       - name: Comment on the PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}                            # a short-lived token GitHub gives each run
         run: gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
 
       - name: Fail the check if the review found blocking issues

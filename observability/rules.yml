@@ -1,26 +1,40 @@
+# Prometheus rules. Prometheus evaluates every rule every 15s (evaluation_interval in prometheus.yml).
+# Check them in the UI: http://localhost:9090/rules and http://localhost:9090/alerts
+
 groups:
-  # Recording rules: pre-compute expensive queries every 15s so dashboards
-  # and the GraphQL API read one cheap series instead of crunching buckets.
+  # ---------------------------------------------------------------- RECORDING RULES
+  # A recording rule runs a (usually expensive) query on a schedule and saves the result as a NEW
+  # time series with the name in "record". Dashboards and the GraphQL API then read that series:
+  # a cheap lookup instead of recomputing over all the histogram buckets on every request.
+  # Naming convention  level:metric:operation  ->  per service : latency : p99 over 5 minutes.
   - name: workload-recording
     rules:
+      # p99 latency per service over the last 5 minutes
       - record: service:http_request_duration_seconds:p99_5m
         expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
+      # p50 (median) latency per service, to compare with p99 (the gap = the "tail")
       - record: service:http_request_duration_seconds:p50_5m
         expr: histogram_quantile(0.50, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
+      # share of requests that returned 5xx:  errors per second / all requests per second
       - record: service:http_requests:error_ratio_5m
         expr: sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m]))
 
+  # ---------------------------------------------------------------- ALERTING RULES
+  # An alert fires when "expr" returns something, and keeps returning it for the "for" duration.
+  #   inactive -> pending (condition true, waiting for "for") -> firing
+  # "for" stops short spikes from paging anyone. In a real setup, firing alerts go to
+  # Alertmanager, which groups them and routes them to Slack, PagerDuty or FireHydrant.
   - name: workload-alerts
     rules:
       - alert: HighP99Latency
-        expr: service:http_request_duration_seconds:p99_5m > 0.5
+        expr: service:http_request_duration_seconds:p99_5m > 0.5      # SLO: p99 under 500 ms
         for: 2m
-        labels: {severity: page}
+        labels: {severity: page}          # page = wake someone up
         annotations:
           summary: "{{ $labels.service }} p99 is {{ $value | humanizeDuration }} (SLO 500ms)"
       - alert: HighErrorRate
-        expr: service:http_requests:error_ratio_5m > 0.05
+        expr: service:http_requests:error_ratio_5m > 0.05              # more than 5% errors
         for: 5m
-        labels: {severity: ticket}
+        labels: {severity: ticket}        # ticket = fix during working hours
         annotations:
           summary: "{{ $labels.service }} 5xx ratio {{ $value | humanizePercentage }}"

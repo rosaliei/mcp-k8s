@@ -1,6 +1,14 @@
 # The identity the MCP server uses. It can READ, never change.
 # This is what makes "the agent can investigate but never change the cluster" true:
 # Kubernetes itself refuses writes, not just our Python code.
+#
+# RBAC (Role-Based Access Control) in 3 parts:
+#   ServiceAccount      an identity for a program (people use user accounts; programs use ServiceAccounts)
+#   ClusterRole         a list of allowed actions: which resources + which verbs (get, list, delete, ...)
+#   ClusterRoleBinding  connects them: "this ServiceAccount has this role"
+# Anything not listed is DENIED. Note what's missing on purpose: no "secrets", and no write verbs
+# (create, update, patch, delete). Test it:
+#   kubectl --kubeconfig kind/mcp-reader.kubeconfig auth can-i delete pods -n payments   -> no
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -18,6 +26,7 @@ metadata:
   name: mcp-read-only
 rules:
   - apiGroups: [""]
+    # pods/log is a separate "subresource": needed for kubectl logs
     resources: ["pods", "pods/log", "events", "namespaces", "nodes", "services", "endpoints"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]

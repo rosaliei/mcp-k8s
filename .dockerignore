@@ -1,5 +1,9 @@
+# Files Docker must NOT copy into the image (COPY . . in the Dockerfile).
+# .venv is your Mac's virtualenv: wrong OS for the container, and big.
 .venv
 .git
 __pycache__
 *.pyc
 .DS_Store
+practice
+kind/*.kubeconfig
