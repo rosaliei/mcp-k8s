@@ -6,6 +6,8 @@
 #   prometheus  (:9090)  scrapes sample-app and graphql-api by their service names
 #   grafana     (:3001)  dashboards                -> http://localhost:3001
 #
+# MySQL for practice (only starts with the profile):   docker compose --profile practice up -d
+#
 # One-off tools (bench.py, client_test.py, review.py) still run from your terminal with the .venv.
 
 services:
@@ -46,3 +48,13 @@ services:
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on: [prometheus]
+
+  mysql:
+    image: mysql:8.4
+    profiles: ["practice"]               # optional: only starts with --profile practice
+    ports: ["3307:3306"]                 # 3307 so it never clashes with a local MySQL
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: support
+    volumes:
+      - ./practice/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
