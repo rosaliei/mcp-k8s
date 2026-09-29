@@ -1,8 +1,10 @@
 """
 MCP client test: connect to the server, list its tools, investigate, measure p99.
 
-Run:  python mcp_server/client_test.py          (200 latency calls)
+Run:  python mcp_server/client_test.py          (fake cluster, 200 latency calls)
       python mcp_server/client_test.py -n 50
+Real cluster (see kind/):
+      K8S_MODE=kubectl KUBECONFIG=$PWD/kind/mcp-reader.kubeconfig python mcp_server/client_test.py
 
 This does what Claude Code / Claude Desktop do behind the scenes:
   1. start server.py as a child process
@@ -40,7 +42,16 @@ def percentile(values, p):
     return ordered[max(index, 0)]
 
 
-async def main(n):
+async def call_tool(session, tool_name, arguments):
+    """Call one MCP tool, print what we asked and what came back, return the text."""
+    result = await session.call_tool(tool_name, arguments)
+    text = result.content[0].text
+    print(f"\n> {tool_name}({arguments})")
+    print(text)
+    return text
+
+
+async def main(n, namespace):
     # How to start the server: same Python as us, running server.py
     server = StdioServerParameters(command=sys.executable, args=[SERVER_SCRIPT], env=dict(os.environ))
 
@@ -56,17 +67,26 @@ async def main(n):
             print("tools:", ", ".join(tool.name for tool in tools.tools))
 
             # Step 3: investigate like an agent would
-            print("\n--- investigation: what's broken in the payments namespace? ---")
-            steps = [
-                ("list_pods", {"namespace": "payments"}),
-                ("get_events", {"namespace": "payments"}),
-                ("get_pod_logs", {"name": "checkout-7d9f8-fghij", "namespace": "payments"}),
-                ("get_workload_metrics", {"name_contains": "checkout"}),
-            ]
-            for tool_name, arguments in steps:
-                result = await session.call_tool(tool_name, arguments)
-                print(f"\n> {tool_name}({arguments})")
-                print(result.content[0].text)
+            print(f"\n--- investigation: what's broken in the {namespace} namespace? ---")
+
+            pods = json.loads(await call_tool(session, "list_pods", {"namespace": namespace}))
+            # A pod is suspicious if it isn't Running OR it has restarted.
+            # (A crash-looping pod shows "Running" for a few seconds between crashes.)
+            broken = []
+            for pod in pods:
+                if pod["status"] != "Running" or pod["restarts"] > 0:
+                    broken.append(pod)
+            broken.sort(key=lambda pod: pod["restarts"], reverse=True)   # most restarts first
+            await call_tool(session, "get_events", {"namespace": namespace})
+            if broken:
+                pod = broken[0]                       # look closer at the first broken pod
+                await call_tool(session, "describe_pod", {"name": pod["name"], "namespace": namespace})
+                crashed_before = pod["restarts"] > 0  # if it restarted, the error is in the PREVIOUS container's logs
+                await call_tool(session, "get_pod_logs", {"name": pod["name"], "namespace": namespace, "previous": crashed_before})
+                app_name = pod["name"].split("-")[0]  # "checkout-7d9f8-fghij" -> "checkout"
+                await call_tool(session, "get_workload_metrics", {"name_contains": app_name})
+            else:
+                print("\nno broken pods found")
 
             # Step 4: latency - call one tool n times
             print(f"\n--- latency: {n} x list_pods ---")
@@ -83,11 +103,14 @@ async def main(n):
     print(f"{'client-side':<14}{percentile(client_ms, 50):>8.1f}{percentile(client_ms, 95):>8.1f}"
           f"{percentile(client_ms, 99):>8.1f}{max(client_ms):>8.1f}")
     print(f"{'server-side':<14}{server['p50']:>8.1f}{server['p95']:>8.1f}{server['p99']:>8.1f}{server['max']:>8.1f}")
-    print("\np50 is small but p99 is 10x+ bigger: 3% of calls hit the 'slow API server' path.")
+    ratio = percentile(client_ms, 99) / percentile(client_ms, 50)
+    print(f"\np99 is {ratio:.1f}x the p50. A big ratio means a slow tail: a few calls are much slower than normal.")
     print("client minus server = transport overhead.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=200, help="how many latency calls")
-    asyncio.run(main(parser.parse_args().n))
+    parser.add_argument("--namespace", default="payments", help="namespace to investigate")
+    args = parser.parse_args()
+    asyncio.run(main(args.n, args.namespace))

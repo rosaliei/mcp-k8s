@@ -8,7 +8,8 @@ What it offers the agent (these are the MCP "tools"):
 
 Modes (set the env var K8S_MODE):
   mock     (default) a fake cluster with some broken pods to investigate
-  kubectl  runs real `kubectl get/logs/describe` on your current context, read-only
+  kubectl  runs real `kubectl get/logs/describe` against KUBECONFIG, read-only
+           (see kind/ for a local cluster and a read-only ServiceAccount)
 
 How MCP over stdio works: the client (Claude Code, Claude Desktop, client_test.py) starts this
 script and talks to it in JSON over stdin/stdout. So stdout is RESERVED for the protocol.
@@ -28,6 +29,7 @@ from mcp.server.mcpserver import MCPServer
 
 MODE = os.getenv("K8S_MODE", "mock")
 GRAPHQL_URL = os.getenv("GRAPHQL_URL", "http://localhost:8001/graphql")
+KUBECTL = os.getenv("KUBECTL", "kubectl")   # path to the kubectl binary
 
 mcp = MCPServer("k8s-investigator")
 
@@ -100,11 +102,42 @@ def pretend_to_call_api_server():
 
 
 def kubectl(*args):
-    """Run a read-only kubectl command and return its output."""
+    """
+    Run a read-only kubectl command and return its output.
+    Two safety layers:
+      1. this allow-list (only get/logs/describe/top)
+      2. the cluster itself: KUBECONFIG should be a read-only ServiceAccount (see kind/rbac-read-only.yaml)
+    If kubectl fails, return the error text instead of crashing, so the agent can read it
+    (for example "Forbidden" or "NotFound" is useful information).
+    """
     if args[0] not in ["get", "logs", "describe", "top"]:
-        raise ValueError(f"kubectl {args[0]} is not allowed. This server is read-only.")
-    result = subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=20, check=True)
+        return f"ERROR: kubectl {args[0]} is not allowed. This server is read-only."
+    result = subprocess.run([KUBECTL, *args], capture_output=True, text=True, timeout=20)
+    if result.returncode != 0:
+        return f"ERROR: {result.stderr.strip()}"
     return result.stdout
+
+
+def real_pod_rows(namespace):
+    """kubectl get pods -o json, turned into the same simple rows the mock returns."""
+    if namespace:
+        output = kubectl("get", "pods", "-n", namespace, "-o", "json")
+    else:
+        output = kubectl("get", "pods", "-A", "-o", "json")
+    if output.startswith("ERROR"):
+        return output
+    rows = []
+    for pod in json.loads(output)["items"]:
+        status = pod["status"].get("phase", "Unknown")      # Running, Pending, Succeeded, Failed
+        restarts = 0
+        for container in pod["status"].get("containerStatuses", []):
+            restarts += container.get("restartCount", 0)
+            waiting = container.get("state", {}).get("waiting")
+            if waiting:
+                status = waiting["reason"]                   # CrashLoopBackOff, ImagePullBackOff, ...
+        rows.append({"name": pod["metadata"]["name"], "namespace": pod["metadata"]["namespace"],
+                     "status": status, "restarts": restarts})
+    return json.dumps(rows, indent=2)
 
 
 # ------------------------------------------------------------------ tools
@@ -115,10 +148,7 @@ def list_pods(namespace: str = "") -> str:
     """List pods with status and restart count. Empty namespace = all namespaces."""
     start = time.perf_counter()
     if MODE == "kubectl":
-        if namespace:
-            output = kubectl("get", "pods", "-n", namespace, "-o", "wide")
-        else:
-            output = kubectl("get", "pods", "-A", "-o", "wide")
+        output = real_pod_rows(namespace)
     else:
         pretend_to_call_api_server()
         rows = []
@@ -149,11 +179,22 @@ def describe_pod(name: str, namespace: str) -> str:
 
 
 @mcp.tool()
-def get_pod_logs(name: str, namespace: str, tail: int = 50) -> str:
-    """Last N log lines of a pod."""
+def get_pod_logs(name: str, namespace: str, tail: int = 50, previous: bool = False) -> str:
+    """Last N log lines of a pod. Set previous=true for a crashing pod: it shows the logs of the
+    container that died (like kubectl logs --previous), which is where the error usually is."""
     start = time.perf_counter()
     if MODE == "kubectl":
-        output = kubectl("logs", name, "-n", namespace, f"--tail={tail}")
+        output = ""
+        if previous:
+            output = kubectl("logs", name, "-n", namespace, f"--tail={tail}", "--previous")
+            # In a fast crash loop the previous container may already be cleaned up.
+            # kubectl then prints "unable to retrieve container logs" but still exits 0!
+            # Fall back to the current container's logs, and say so.
+            if output.startswith("ERROR") or output.startswith("unable to retrieve container logs"):
+                output = f"(previous container logs not available: {output})\n--- current container logs ---\n"
+                output += kubectl("logs", name, "-n", namespace, f"--tail={tail}")
+        else:
+            output = kubectl("logs", name, "-n", namespace, f"--tail={tail}")
     else:
         pretend_to_call_api_server()
         lines = LOGS.get(name, ["(no logs - container never started)"])

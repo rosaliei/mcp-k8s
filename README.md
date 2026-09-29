@@ -203,6 +203,64 @@ $ claude mcp add k8s -- "$PWD/.venv/bin/python" "$PWD/mcp_server/server.py"
 ```
 Then in Claude Code ask: *"what's broken in the payments namespace?"*
 
+### Step 2.4: Run it against a REAL Kubernetes cluster (kind)
+
+kind runs a real Kubernetes cluster inside Docker on your Mac. Your normal `~/.kube/config` is **not** changed: this cluster gets its own kubeconfig files in `kind/`.
+
+**Create the cluster** (first time about 2 minutes):
+```
+$ ./kind/up.sh
+```
+This creates the cluster `mcp-k8s`, deploys 4 workloads into namespace `payments` (`kind/broken-workloads.yaml`), and makes a **read-only** login for the MCP server (`kind/rbac-read-only.yaml` → `kind/mcp-reader.kubeconfig`).
+
+**Look at the pods** (wait 1 minute first):
+```
+$ /usr/local/bin/kubectl --kubeconfig kind/admin.kubeconfig get pods -n payments
+```
+**You should see:**
+```
+NAME                        READY   STATUS             RESTARTS
+checkout-...                0/1     OOMKilled          2          <- uses more memory than its 128Mi limit
+ingest-...                  0/1     Pending            0          <- asks for 64 CPUs, no node has that
+ledger-...                  0/1     ImagePullBackOff   0          <- image tag typo: busybox:1.36-typo
+search-...                  1/1     Running            0          <- healthy
+```
+(Use `/usr/local/bin/kubectl` because your shell's `kubectl` is an alias for `kubecolor`.)
+
+**Prove the MCP login is read-only:**
+```
+$ /usr/local/bin/kubectl --kubeconfig kind/mcp-reader.kubeconfig auth can-i delete pods -n payments
+$ /usr/local/bin/kubectl --kubeconfig kind/mcp-reader.kubeconfig delete pod -n payments -l app=search
+```
+**You should see:** `no`, then `Error from server (Forbidden) ... cannot delete resource "pods"`.
+**What it means:** the agent can investigate but can never change the cluster, and **Kubernetes enforces that** (RBAC), not just the Python allow-list.
+
+**Run the MCP investigation on the real cluster:**
+```
+$ K8S_MODE=kubectl KUBECTL=/usr/local/bin/kubectl KUBECONFIG=$PWD/kind/mcp-reader.kubeconfig python mcp_server/client_test.py
+```
+**You should see:** it picks `checkout` (the pod with the most restarts), then:
+- `describe_pod`: **`Reason: OOMKilled`, `Exit Code: 137`, `Limits: memory: 128Mi`**
+- `get_pod_logs`: `(previous container logs not available ...)`, then the current logs: just two INFO lines and **no error**
+
+**What the real cluster teaches you (the mock doesn't):**
+1. **A crash-looping pod sometimes shows `Running`** for a few seconds between crashes. Check RESTARTS, not just STATUS.
+2. **OOMKilled apps don't log an error.** The kernel kills them instantly. The evidence is `Exit Code: 137` and `Reason: OOMKilled` in `describe`, compared with the memory limit.
+3. **`kubectl logs --previous` can fail in a fast crash loop.** It prints "unable to retrieve container logs" but still exits 0. The server falls back to the current logs.
+4. **Real events are noisy.** The early "untolerated taint" warnings are from before the node was ready. They're not the problem.
+
+**Use the real cluster from Claude Code** (optional):
+```
+$ claude mcp add k8s-real -e K8S_MODE=kubectl -e KUBECTL=/usr/local/bin/kubectl -e KUBECONFIG=$PWD/kind/mcp-reader.kubeconfig -- "$PWD/.venv/bin/python" "$PWD/mcp_server/server.py"
+```
+Then ask Claude: *"what's broken in the payments namespace?"*
+
+**Delete the cluster when done** (your other kind clusters are not touched):
+```
+$ ./kind/down.sh
+```
+The read-only token lasts 24 hours. If the MCP server gets `Unauthorized` the next day, run `./kind/up.sh` again to make a new one.
+
 ---
 
 ## Part 3: Multi-agent code review with git

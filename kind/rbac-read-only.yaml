@@ -1,0 +1,41 @@
+# The identity the MCP server uses. It can READ, never change.
+# This is what makes "the agent can investigate but never change the cluster" true:
+# Kubernetes itself refuses writes, not just our Python code.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-reader
+  namespace: mcp-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-read-only
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "namespaces", "nodes", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-reader-read-only
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-read-only
+subjects:
+  - kind: ServiceAccount
+    name: mcp-reader
+    namespace: mcp-system
