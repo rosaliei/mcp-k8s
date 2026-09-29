@@ -1,0 +1,48 @@
+# Runs the multi-agent reviewer on every pull request and posts the result as a PR comment.
+# Offline rules by default. If you add a repo secret ANTHROPIC_API_KEY, it uses Claude agents instead.
+name: code-review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write      # needed to post the comment
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history, so we can diff against the base branch
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install anthropic
+
+      - name: Run review
+        id: review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          FLAG=""
+          if [ -n "$ANTHROPIC_API_KEY" ]; then FLAG="--llm"; fi
+          set +e
+          python code_review/review.py --diff "origin/${{ github.base_ref }}" --markdown $FLAG > review.md
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat review.md
+
+      - name: Comment on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
+
+      - name: Fail the check if the review found blocking issues
+        if: steps.review.outputs.exit_code != '0'
+        run: |
+          echo "Review verdict was not APPROVE (exit code ${{ steps.review.outputs.exit_code }})"
+          exit 1

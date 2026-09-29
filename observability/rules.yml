@@ -1,0 +1,26 @@
+groups:
+  # Recording rules: pre-compute expensive queries every 15s so dashboards
+  # and the GraphQL API read one cheap series instead of crunching buckets.
+  - name: workload-recording
+    rules:
+      - record: service:http_request_duration_seconds:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
+      - record: service:http_request_duration_seconds:p50_5m
+        expr: histogram_quantile(0.50, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m])))
+      - record: service:http_requests:error_ratio_5m
+        expr: sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m]))
+
+  - name: workload-alerts
+    rules:
+      - alert: HighP99Latency
+        expr: service:http_request_duration_seconds:p99_5m > 0.5
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.service }} p99 is {{ $value | humanizeDuration }} (SLO 500ms)"
+      - alert: HighErrorRate
+        expr: service:http_requests:error_ratio_5m > 0.05
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.service }} 5xx ratio {{ $value | humanizePercentage }}"

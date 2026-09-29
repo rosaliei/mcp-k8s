@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn>=0.29
+strawberry-graphql>=0.240
+httpx>=0.27
+prometheus-client>=0.20
+mcp>=2.2
+anthropic>=0.60

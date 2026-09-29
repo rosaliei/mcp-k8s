@@ -1,0 +1,14 @@
+#!/bin/sh
+# Git runs this before every commit. It reviews ONLY what you staged (git add).
+# If critical/high issues are found, the commit is blocked.
+#
+# Turn on once:   git config core.hooksPath hooks
+# Skip once:      git commit --no-verify
+if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python3; fi
+$PY code_review/review.py --staged
+status=$?
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "Commit blocked by code review. Fix the issues, or skip with: git commit --no-verify"
+  exit 1
+fi
