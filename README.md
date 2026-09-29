@@ -26,6 +26,21 @@ git diff ──► code_review: [security | reliability | style] in parallel ─
 source .venv/bin/activate   # in every new terminal
 ```
 
+## Which files to read
+
+| Priority | File | What to take from it |
+|---|---|---|
+| **Read** | `mcp_server/server.py` | One function per tool; the docstring is what the AI reads; read-only kubectl allow-list; log to stderr, never stdout. |
+| **Read** | `code_review/review.py` | Sections 1 and 4: reading a `git diff`, agents in parallel, exit codes for CI, fail-closed verdict. Skim section 3 (Claude API call). |
+| **Read** | `graphql_api/server.py` | `RAW_QUERIES` / `FAST_QUERIES` (the PromQL), the `Prometheus` class (cache, query count), `make_loader` (batching). Skip the strawberry type details. |
+| **Read** | `observability/sample_app.py` | How an app exposes metrics: Counter, Gauge, Histogram with labels. |
+| **Read** | `docker-compose.yml`, `Dockerfile` | Services find each other by name; health check so graphql-api waits for Prometheus. |
+| **Read** | `observability/prometheus.yml`, `rules.yml` | Scrape targets, recording rules, alert rules. |
+| **Read** | `.github/workflows/code-review.yml`, `hooks/pre-commit` | How the reviewer runs in CI and before each commit. |
+| Skim | `graphql_api/bench.py`, `mcp_server/client_test.py` | Run them and read the output; the code is just timing loops. |
+| Ignore | `demo_app/payments.py` | Bait for the reviewer. On the demo branch it's deliberately bad. |
+| Ignore | `observability/grafana/.../latency.json` | Generated dashboard JSON. |
+
 ## 1. GraphQL API + Prometheus
 
 ```bash
