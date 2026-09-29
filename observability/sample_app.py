@@ -13,6 +13,7 @@ Each service has a different latency "shape", so the gap between p50 and p99 is 
 With --incident, that service gets much slower and the HighP99Latency alert fires in about 2 minutes.
 """
 import argparse
+import os
 import random
 import threading
 import time
@@ -64,7 +65,9 @@ def generate_traffic(service, settings, incident_service):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--incident", choices=list(SERVICES), help="make one service slow")
+    # In Docker, set the INCIDENT env var instead:  INCIDENT=checkout docker compose up -d sample-app
+    parser.add_argument("--incident", default=os.getenv("INCIDENT") or None, choices=list(SERVICES),
+                        help="make one service slow")
     args = parser.parse_args()
 
     start_http_server(args.port)

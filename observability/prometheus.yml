@@ -5,9 +5,9 @@ global:
 rule_files: [/etc/prometheus/rules.yml]
 
 scrape_configs:
-  - job_name: sample-app          # fake microservices (sample_app.py)
-    static_configs: [{targets: ["host.docker.internal:8000"]}]
+  - job_name: sample-app          # fake microservices (sample_app.py, running in Docker)
+    static_configs: [{targets: ["sample-app:8000"]}]
   - job_name: graphql-api         # the GraphQL lab server measures itself too
-    static_configs: [{targets: ["host.docker.internal:8001"]}]
+    static_configs: [{targets: ["graphql-api:8001"]}]
   - job_name: prometheus
     static_configs: [{targets: ["localhost:9090"]}]

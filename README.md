@@ -29,11 +29,14 @@ source .venv/bin/activate   # in every new terminal
 ## 1. GraphQL API + Prometheus
 
 ```bash
-docker compose up -d                       # Prometheus :9090, Grafana :3001
-python observability/sample_app.py         # fake services exposing metrics on :8000
-python graphql_api/server.py               # GraphQL on :8001 (fake data if Prometheus is down; MOCK=1 forces it)
-python graphql_api/bench.py                # compare naive / batched / optimized: p50, p95, p99
+docker compose up -d --build               # sample-app :8000, graphql-api :8001, Prometheus :9090, Grafana :3001
+docker compose ps                          # all "Up"
+python graphql_api/bench.py                # run from your terminal: compare naive / batched / optimized
+INCIDENT=checkout docker compose up -d sample-app   # make checkout slow; watch p99 and the alert
+docker compose down                        # stop everything
 ```
+The long-running services run in Docker (one image, see `Dockerfile`). One-off tools such as `bench.py`, `client_test.py` and `review.py` run from your terminal with the `.venv`.
+To run a service without Docker instead: `python graphql_api/server.py` (it uses fake data if Prometheus isn't reachable; `MOCK=1` forces fake data).
 Open http://localhost:8001/graphql and try:
 ```graphql
 { workloads { name p99LatencyMs cpuCores memoryMb } }

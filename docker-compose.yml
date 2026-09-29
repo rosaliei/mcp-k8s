@@ -1,16 +1,45 @@
-# Prometheus + Grafana. The Python apps run on your Mac; Prometheus scrapes them via host.docker.internal.
+# Start everything:   docker compose up -d --build
+# Stop everything:    docker compose down
+#
+#   sample-app  (:8000)  fake microservices exposing /metrics
+#   graphql-api (:8001)  GraphQL over Prometheus   -> http://localhost:8001/graphql
+#   prometheus  (:9090)  scrapes sample-app and graphql-api by their service names
+#   grafana     (:3001)  dashboards                -> http://localhost:3001
+#
+# One-off tools (bench.py, client_test.py, review.py) still run from your terminal with the .venv.
+
 services:
+  sample-app:
+    build: .
+    command: python observability/sample_app.py
+    environment:
+      INCIDENT: ${INCIDENT:-}          # INCIDENT=checkout docker compose up -d sample-app
+    ports: ["8000:8000"]
+
+  graphql-api:
+    build: .
+    command: python graphql_api/server.py
+    environment:
+      PROM_URL: http://prometheus:9090   # inside Docker, services find each other by name
+    ports: ["8001:8001"]
+    depends_on:
+      prometheus:
+        condition: service_healthy       # wait until Prometheus is ready, or the API falls back to fake data
+
   prometheus:
     image: prom/prometheus:v2.53.0
     ports: ["9090:9090"]
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/rules.yml:/etc/prometheus/rules.yml:ro
-    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 5s
+      retries: 12
 
   grafana:
     image: grafana/grafana:11.1.0
-    ports: ["3001:3000"]          # 3001 because port 3000 is often taken
+    ports: ["3001:3000"]                 # 3001 because port 3000 is often taken
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
